@@ -325,24 +325,28 @@ def anatase_results_xls(sizes):
     dL=np.linalg.norm([d101/np.sin(alpha),dA/np.tan(alpha)])
     da=np.linalg.norm([d101/np.cos(alpha),dC*np.tan(alpha)])
 
+    dCA=(C/A)*np.linalg.norm([dC/C,dA/A])
 
     worksheet.write('B7', 'Value (nm)')
     worksheet.write('B8', 'A')
     worksheet.write('B9', 'C')
     worksheet.write('B10', 'L')
     worksheet.write('B11', 'a')
+    worksheet.write('B12', 'C/A')
 
     worksheet.write('C7', 'Value (nm)')
     worksheet.write('C8', A)
     worksheet.write('C9', C)
     worksheet.write('C10', L)
     worksheet.write('C11', a)
+    worksheet.write('C12', C/A)
 
     worksheet.write('D7', 'Error (nm)')
     worksheet.write('D8', dA)
     worksheet.write('D9', dC)
     worksheet.write('D10', dL)
     worksheet.write('D11', da)
+    worksheet.write('D12', dCA)
 
     su200=4*A*L
     su004=2*a*a
