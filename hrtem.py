@@ -102,6 +102,7 @@ class plane_analysis():
         return self.fft_peaks
 
     def plot_fft_peaks(self):
+        plt.clf()
         plt.imshow(self.filtered_fft)
         for peak in self.fft_peaks:
             plt.plot(peak[1],peak[0],"ro")
