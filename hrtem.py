@@ -20,7 +20,7 @@ class plane_analysis():
     def __init__(self,fname,save_images=True, h=0.07,spot_sigma=300,
                  use_watershed=False,
                  filter_by_ellipse=False,
-                 filter_by_elipse_axes=False):
+                 filter_by_ellipse_axes=False):
 
         '''
         Class used to analyse HRTEM images of TiO2 and measure their sizes along different crystalline directions.
@@ -239,7 +239,7 @@ class plane_analysis():
                         print(self.image.metadata.General.original_filename.split(".")[0]+"_"+plane+"_"+str(i)+" not good")
                         self.sizes[plane].append(0)
                     else:
-                        if self.filter_by_elipse_axes and abs(raxes-1)<0.4:
+                        if self.filter_by_ellipse_axes and abs(raxes-1)<0.4:
                             print(self.image.metadata.General.original_filename.split(".")[0]+"_"+plane+"_"+str(i)+" not good")
                             self.sizes[plane].append(0)
                         else:
