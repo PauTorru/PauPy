@@ -42,7 +42,7 @@ class plane_analysis():
         filter_by_ellipse: bool
             If true filters planes identified as 004 if not aligned with one of the minor/major axes of the particle.
             use if C/A is very different than one.
-        filter_by_elipse_axes: bool
+        filter_by_ellipse_axes: bool
             If true filters planes identified as 004 minor/major are very similar in size.
             use if C/A is very different than one.
 
@@ -58,7 +58,7 @@ class plane_analysis():
         self.use_watershed=use_watershed
         self.save=save_images
         self.filter_by_ellipse=filter_by_ellipse
-        self.filter_by_elipse_axes=filter_by_elipse_axes
+        self.filter_by_ellipse_axes=filter_by_ellipse_axes
 
     def label2coord(self,imlabel):
         return np.dstack(np.where(imlabel))[0]
