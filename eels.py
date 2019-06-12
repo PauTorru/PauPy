@@ -185,7 +185,7 @@ def rebuild(factors,loadings):
 
     return s
 #####################################################
-def dark_correct(s,d):
+def dark_correct_from_image(s,d):
     '''Apply dark reference (d) to spectrum image, spectrum line or signle spectrum (s). returns spectral data dark corrected'''
     dark=d.deepcopy()
     dark.unfold()
@@ -194,6 +194,13 @@ def dark_correct(s,d):
     s_corrected.data-=dr
     return s_corrected
 
+def dark_correct_from_th(s,th):
+    '''Apply dark reference (d) to spectrum image, spectrum line or signle spectrum (s). returns spectral data dark corrected'''
+    d=s.data[s.data.sum(-1)>th]
+    dr=np.average(d,0)
+    s_corrected=s.deepcopy()
+    s_corrected.data-=dr
+    return s_corrected
 ####################################
 def load_emi(fname):
     s=hs.load(fname).inav[1:,:]
