@@ -262,20 +262,21 @@ class clustering():
         color_threshold=self.linktree[-nclusters+1,2])
         return dn
 
+    def hierachical_cluster(nclusters=2):
+        self.nclusters=nclusters
+        self.labels=fcluster(self.linktree,self.linktree[-nclusters,2],criterion="distance").reshape(self.si.data.shape[:-1])
+        self.labels=np.array(self.labels)
 
-    def plot_cluster_image(self,nclusters=2):
-        if self.algorithm=="hierachical":
-            self.labels=fcluster(self.linktree,self.linktree[-nclusters,2],criterion="distance").reshape(self.si.data.shape[:-1])
-            self.labels=np.array(self.labels)
+    def plot_cluster_image(self):
 
-        colors=list(sns.color_palette("bright",nclusters))
+        colors=list(sns.color_palette("bright",self.nclusters))
         fig=plt.figure()
         ax1=plt.subplot(121)
         cm = LinearSegmentedColormap.from_list('dunno', colors)
-        plt.imshow(self.labels/nclusters,cmap=cm)
+        plt.imshow(self.labels,cmap=cm)
 
         ax2=plt.subplot(122)
-        for i in range(nclusters):
+        for i in range(self.nclusters):
             plt.plot(self.si.axes_manager[-1].axis,np.average(self.si.data[self.labels==i+1],axis=0),color=colors[i])
 
         ax2.set_xlabel("Energy Loss (eV)")
@@ -284,6 +285,8 @@ class clustering():
     def kmeans(self,cluster_kwargs):
         km = KMeans(**cluster_kwargs).fit(self.objects)
         self.labels=km.labels_.reshape(self.si.data.shape[:-1])
+        self.labels+=1
+        self.nclusters=cluster_kwargs["n_clusters"]
         return
 
     def agglo(self):
