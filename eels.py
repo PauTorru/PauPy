@@ -283,7 +283,7 @@ class clustering():
 
     def kmeans(self,cluster_kwargs):
         km = KMeans(**cluster_kwargs).fit(self.objects)
-        self.labels=km.labels_
+        self.labels=km.labels_.reshape(self.si.data.shape[:-1])
         return
 
     def agglo(self):
