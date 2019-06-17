@@ -196,7 +196,7 @@ def dark_correct_from_image(s,d):
 
 def dark_correct_from_th(s,th):
     '''Apply dark reference (d) to spectrum image, spectrum line or signle spectrum (s). returns spectral data dark corrected'''
-    d=s.data[s.data.sum(-1)>th]
+    d=s.data[s.data.sum(-1)<th]
     dr=np.average(d,0)
     s_corrected=s.deepcopy()
     s_corrected.data-=dr
