@@ -4,6 +4,7 @@ Created on Tue May 28 09:58:03 2019
 
 @author: ptbe
 """
+from setuptools import setup
 
 import hyperspy.api as hs
 import numpy as np
