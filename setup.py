@@ -19,6 +19,6 @@ setup(
     description='Collection of TEM and EELS analysis functions',
     version='0.1',
     url='https://github.com/PauTorru/PauPy',
-    author='Pau Torruella Besa,
+    author='Pau Torruella Besa',
     author_email='pautorruellabesa@gmail.com'
     )
