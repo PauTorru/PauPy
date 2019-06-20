@@ -212,10 +212,11 @@ class clustering():
     def __init__(self,s,algorithm="hierachical",on_pca_scores=False,
                  pca_comps=2,pca_kwargs={},cluster_kwargs={},normalize=True):
 
-        self.si=s
+
         s.unfold()
         self.objects=np.copy(s.data)
         s.fold()
+        self.si=s
 
         if normalize:
             self.objects-=self.objects.min()
@@ -223,7 +224,7 @@ class clustering():
 
         if on_pca_scores:
             self.si.decomposition(**pca_kwargs)
-            l=self.si.get_decomposition_components(pca_comps)
+            l=self.si.get_decomposition_loadings().inav[:pca_comps]
             l.unfold()
             self.objects=np.rollaxis(l.data,1)
             for i in range(pca_comps):
@@ -262,7 +263,7 @@ class clustering():
         color_threshold=self.linktree[-nclusters+1,2])
         return dn
 
-    def hierachical_cluster(nclusters=2):
+    def hierachical_cluster(self,nclusters=2):
         self.nclusters=nclusters
         self.labels=fcluster(self.linktree,self.linktree[-nclusters,2],criterion="distance").reshape(self.si.data.shape[:-1])
         self.labels=np.array(self.labels)
