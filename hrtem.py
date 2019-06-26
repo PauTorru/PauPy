@@ -276,7 +276,7 @@ def plane_analysis_onfolder(folder=None,**kwargs):
         ext=file.split(".")[-1]
         if ext=="dm3" or ext=="tif":
             print("now working on file "+file)
-            a=plane_analysis(fname=file,**kwargs)
+            a=plane_analysis(fname=folder+"/"+file,**kwargs)
             a.run_analysis()
             sizes200+=a.sizes["200"]
             sizes004+=a.sizes["004"]
