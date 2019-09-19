@@ -13,6 +13,333 @@ import skimage as ski
 import os
 import time
 import xlsxwriter
+import copy
+import cv2
+import imutils
+
+def label2coord(imlabel):
+    return np.dstack(np.where(imlabel))[0]
+
+def thresholdpau(im):
+    d=np.histogram(im.ravel(),bins=100)
+    x=(d[1][:-1]+d[1][1:])/2
+    cder=np.convolve(d[0][1:]-d[0][:-1],np.ones(4))
+    mask=np.zeros(x.shape)
+    mask[10:]=1
+    n=np.logical_and((cder>0)[1:-1], mask==1).argmax()
+    th=x[n]
+    return th
+
+def to8bit(im2):
+    im=copy.deepcopy(im2).astype("float")
+    im-=im.min()
+    im/=im.max()
+    im*=255
+    return im.astype("uint8")
+
+def ifft(fft):
+    return abs(np.fft.ifft2(np.fft.fftshift(fft)))
+
+def create_fft_mask(fft,position,radius,simetric=False,add0=False):
+
+    mask=np.zeros(fft.shape)
+    circle=cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                     (2*radius+1,2*radius+1))
+
+    center=np.array(fft.shape)/2
+
+    xi=int(position[0]-radius)
+    xf=int(position[0]+radius+1)
+
+    yi=int(position[1]-radius)
+    yf=int(position[1]+radius+1)
+
+    mask[yi:yf,xi:xf]=circle
+
+    if simetric:
+        p2=2*center-np.array(position)
+        xi=int(p2[0]-radius)
+        xf=int(p2[0]+radius+1)
+
+        yi=int(p2[1]-radius)
+        yf=int(p2[1]+radius+1)
+
+        mask[yi:yf,xi:xf]=circle
+
+    if add0:
+        p2=center
+        xi=int(p2[0]-radius)
+        xf=int(p2[0]+radius+1)
+
+        yi=int(p2[1]-radius)
+        yf=int(p2[1]+radius+1)
+
+        mask[yi:yf,xi:xf]=circle
+
+
+    return mask
+
+
+class plane_analysis_v2():
+
+    def __init__(self,fname,save_images=False,
+                planes2measure={"101":(3.417,3.617),
+                                "004":(2.279,2.479),
+                                "200":(1.793,1.993)},
+                mask_radius=30,
+                filter_by_simmetry={"101":False,
+                                    "004":False,
+                                    "200":False},
+                printduration=True,
+                use_lap=False):
+
+        self.filter_by_simmetry=filter_by_simmetry
+        self.mask_radius=mask_radius
+        self.image=hs.load(fname)
+        self.save_images=save_images
+        self.printduration=printduration
+        self.use_lap=use_lap
+
+        self.fft=getfft(self.image)
+        self.rfft=to8bit(np.log(abs(self.fft)))
+        self.defplanes=planes2measure
+        self.allfftpeaks=self.get_fftpeaks()
+
+        self.fftpeaks=self.filter_planes(self.allfftpeaks)
+
+
+    def get_fftpeaks(self):
+
+
+        self.nice_rfft=cv2.blur(self.rfft,(5,5))
+        b=cv2.blur(self.rfft,(500,500))
+        c=self.nice_rfft-b
+        c[c>200]=0
+
+        n=21
+        kernel=np.ones((n,n))*-1
+        kernel[int(np.floor(n/2)),int(np.floor(n/2))]=n**2-1
+        kernel/=n
+        d=cv2.filter2D(c,0,kernel)
+
+        e=cv2.morphologyEx(d,cv2.MORPH_OPEN,np.ones((5,5)))
+
+        params=cv2.SimpleBlobDetector_Params()
+        params.minArea=80
+        params.filterByCircularity=False
+        params.filterByColor=False
+        params.filterByConvexity=False
+        params.filterByInertia=False
+        params.minThreshold=0
+        params.maxThreshold=150
+        params.filterByArea=True
+        params.minDistBetweenBlobs=10
+        dt=cv2.SimpleBlobDetector_create(params)
+
+        kp=dt.detect(255-to8bit(e))
+
+        return [np.array(k.pt) for k in kp]
+
+    def filter_planes(self,kps):
+
+        center=np.array(self.image.data.shape)/2
+
+        ds=[2*center[0]*self.image.axes_manager[0].scale/np.linalg.norm(k-center) for k in kps]
+        planes={}
+        for key in list(self.defplanes.keys()):
+            ps=[]
+            for d,kp in zip(ds,kps):
+                if d>self.defplanes[key][0]*0.1 and d<self.defplanes[key][1]*0.1 and kp[0]-center[0]>0:
+                    ps.append(kp)
+            planes[key]=ps
+
+        return planes
+
+
+    def plot_fft_peaks(self,plot_all=False):
+
+        plt.imshow(self.nice_rfft)
+        if plot_all:
+            for k in self.allfftpeaks:
+                plt.plot(k[0],k[1],"ro",markersize=3)
+
+        else:
+            for key,c in zip(list(self.defplanes.keys()),plt.rcParams['axes.prop_cycle'].by_key()['color'][:len(self.defplanes.keys())]):
+                for k in self.fftpeaks[key]:
+                    plt.plot(k[0],k[1],"o",color=c,markersize=3)
+
+    def ifft_spot(self,spot):
+
+        mask=create_fft_mask(self.fft,spot,self.mask_radius)
+        filtered=mask*self.fft
+        return(ifft(filtered))
+
+    def measure(self,im,spot):
+
+        center=np.array(self.image.data.shape)/2
+        cs=spot-center
+        angle= -np.arctan(cs[1]/cs[0])*180/np.pi
+        self.current_angle=angle
+
+
+
+
+
+        r=imutils.rotate_bound(im,angle)
+        r=to8bit(r)
+        self.current_r=r
+
+        if self.use_lap:
+            L=cv2.Laplacian(r,0,0,5,4)
+            r-=L
+            r=cv2.morphologyEx(r,cv2.MORPH_OPEN,np.ones((11,11)))
+
+        th=thresholdpau(r)
+        th=to8bit(r>th)
+
+        if self.use_lap:
+            th=cv2.morphologyEx(th,cv2.MORPH_DILATE,np.ones((7,7)))
+
+        a,b,c,d=cv2.connectedComponentsWithStats(th,8)
+        self.current_b=b
+
+
+        isum=np.array([r[b==i].sum() for i in range(1,b.max()+1)])
+        n=np.argmax(isum)+1
+
+        particle=np.zeros(r.shape,"uint8")
+        particle[b==n]=255
+
+        #is on edge?
+        edge=np.ones(self.image.data.shape)
+        edge[5:-5,5:-5]=0
+        redge=imutils.rotate_bound(edge,angle)>0
+        if (redge*particle).sum()>0:
+            self.ok=False
+        else:
+            self.ok=True
+
+        length=c[n,2]*self.image.axes_manager[0].scale
+
+        return particle,[length]
+
+
+    def analyze(self):
+        start=time.time()
+        results={}
+
+        for key in list(self.defplanes.keys()):
+            sizes=[]
+            i=0
+            for spot in self.fftpeaks[key]:
+                i+=1
+                self.current_spot=spot
+
+                spotifft=self.ifft_spot(spot)
+                self.current_spotifft=spotifft
+
+                image_measurement,size=self.measure(spotifft,spot)
+                self.current_measure=image_measurement
+                self.current_size=size
+
+                if self.filter_by_simmetry[key]:
+                    ellipsoid_angle=abs(self.get_ellipsoid_angle()%90)
+                    if ellipsoid_angle<80 and ellipsoid_angle>10:
+                        self.ok=False
+
+                if self.ok:
+                    sizes+=size
+
+                if self.save_images:
+                    fig=self.save_measurement_image()
+                    fig.savefig(key+"_"+"spot"+f"{i:0>4d}"+"_"+self.image.metadata.General.original_filename.split(".")[0]+".png")
+
+            results[key]=sizes
+
+        self.results=results
+        end=time.time()
+        t=end-start
+        if self.printduration:
+            print("Duration of the analysis: "+str(int(t/60))+" minutes "+str(int(t%60))+" seconds" )
+
+        return results
+
+    def get_ellipsoid_angle(self):
+        nzs=cv2.findNonZero(self.current_measure)
+        center,axes,angle=cv2.fitEllipse(nzs)
+        return angle
+
+    def save_measurement_image(self):
+        plt.clf()
+        fig=plt.gcf()
+        fig.set_size_inches(10,6)
+        plt.subplot(131)
+        plt.imshow(self.nice_rfft)
+        plt.plot(self.current_spot[0],self.current_spot[1],"ro",markersize=3)
+        ax=plt.gca()
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        plt.subplot(132)
+        plt.imshow(self.current_spotifft)
+        ax=plt.gca()
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        plt.subplot(133)
+        plt.imshow(self.current_measure)
+        ax=plt.gca()
+        ax.set_xticks([])
+        ax.set_yticks([])
+        if self.ok:
+            plt.gca().set_title("OK "+f"{self.current_size[0]:.2f}"+self.image.axes_manager[0].units)
+
+        else:
+            plt.gca().set_title("NOT OK")
+
+        return fig
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class plane_analysis():
@@ -20,7 +347,8 @@ class plane_analysis():
     def __init__(self,fname,save_images=True, h=0.07,spot_sigma=300,
                  use_watershed=False,
                  filter_by_ellipse=False,
-                 filter_by_ellipse_axes=False):
+                 filter_by_ellipse_axes=False,
+                 use_blob_detection=False):
 
         '''
         Class used to analyse HRTEM images of TiO2 and measure their sizes along different crystalline directions.
@@ -59,6 +387,7 @@ class plane_analysis():
         self.save=save_images
         self.filter_by_ellipse=filter_by_ellipse
         self.filter_by_ellipse_axes=filter_by_ellipse_axes
+        self.use_blob_detection=use_blob_detection
 
     def label2coord(self,imlabel):
         return np.dstack(np.where(imlabel))[0]
@@ -124,6 +453,7 @@ class plane_analysis():
         wmask=int(self.mask.shape[0]/2)
         mask[s[0]-wmask:s[0]+wmask,s[1]-wmask:s[1]+wmask]=self.mask
         mask[s1[0]-wmask:s1[0]+wmask,s1[1]-wmask:s1[1]+wmask]=self.mask
+        self.full_mask=mask
 
         fft_filtered_by_spot=self.fft*mask
 
@@ -145,6 +475,7 @@ class plane_analysis():
         th=ski.filters.threshold_otsu(x)
 
         x[x<th]=0
+        seed=(x==x.max())
 
         if self.use_watershed:
             local_max=ski.morphology.extrema.h_maxima(x,h=50)
@@ -159,8 +490,35 @@ class plane_analysis():
                 if i!=good:
                     x[ws==i]=0
 
+        elif self.use_blob_detection:
+            params = cv2.SimpleBlobDetector_Params()
 
-        seed=(x==x.max())
+            # Filter by Area.
+            params.filterByArea = True
+            params.minArea = 25/(self.image.axes_manager[0].scale)**2
+            params.maxArea=np.inf
+            # Filter by Circularity
+            params.filterByCircularity = False
+            # Filter by Convexity
+            params.filterByConvexity = False
+            # Filter by Inertia
+            params.filterByInertia = False
+            d=cv2.SimpleBlobDetector_create(params)
+            kp=d.detect(255-hr.to8bit(x))
+            self.im_kp=cv2.drawKeypoints(hr.to8bit(iff),kp,np.array([]), (255,0,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+            sds=[i.pt for i in kp]
+            seed=[]
+            for s in sds:
+                a=np.zeros(self.image.data.shape)
+                a[s]=255
+                seed.append()
+
+
+
+
+
+
         mask=np.copy(x)
         filled = ski.morphology.reconstruction(seed, mask, method='dilation')
 
@@ -230,7 +588,7 @@ class plane_analysis():
                 filtered=self.blob_filter(self.spot_ifft(i))
                 th=self.blob_threshold(filtered)
 
-                if self.filter_by_ellipse and plane=="004":
+                if self.filter_by_ellipse and (plane=="004" or plane=="200"):
                     a_el,raxes=self.calculate_ellipse_angle(th)
                     a_sp=self.angles[i]
                     x=(a_el-a_sp)*180/np.pi
@@ -259,6 +617,34 @@ def getfft(hs_im):# lacks returning a proper image
         fft=np.fft.fft2(im)
         fft=np.fft.fftshift(fft)
         return fft
+
+def plane_analysis_onfolder_v2(folder=None,**kwargs):
+    start=time.time()
+    if folder==None:
+        folder=os.getcwd()
+    sizes={}
+
+    for file in os.listdir(folder):
+        ext=file.split(".")[-1]
+        if ext=="dm3" or ext=="tif":
+            print("now working on file "+file)
+            a=plane_analysis_v2(fname=folder+"/"+file,printduration=False,**kwargs)
+            s=a.analyze()
+
+            for key in s.keys():
+                if key in sizes.keys():
+                    sizes[key]+=s[key]
+                else:
+                    sizes[key]=s[key]
+
+    for key in sizes.keys():
+        sizes[key]=np.array(sizes[key])
+
+    end=time.time()
+    elapsed=end-start
+    print("lasted "+str(elapsed)+" seconds")
+    return sizes
+
 
 
 def plane_analysis_onfolder(folder=None,**kwargs):
@@ -298,11 +684,11 @@ def plane_analysis_onfolder(folder=None,**kwargs):
     print("lasted "+str(elapsed)+" seconds")
     return sizes
 
-def anatase_results_xls(sizes):
+def anatase_results_xls(sizes,name):
     '''Returns table of results from the size distributions'''
     alpha=21.69*np.pi/180.
 
-    workbook = xlsxwriter.Workbook('Plane Analysis Results.xlsx')
+    workbook = xlsxwriter.Workbook('Plane Analysis Results'+name+'.xlsx')
     worksheet = workbook.add_worksheet()
 
     results={}
@@ -327,12 +713,13 @@ def anatase_results_xls(sizes):
 
     dCA=(C/A)*np.linalg.norm([dC/C,dA/A])
 
-    worksheet.write('B7', 'Value (nm)')
+    worksheet.write('B7', 'Parameter')
     worksheet.write('B8', 'A')
     worksheet.write('B9', 'C')
     worksheet.write('B10', 'L')
     worksheet.write('B11', 'a')
     worksheet.write('B12', 'C/A')
+
 
     worksheet.write('C7', 'Value (nm)')
     worksheet.write('C8', A)
@@ -353,6 +740,13 @@ def anatase_results_xls(sizes):
     su101=2*(A*A-a*a)/np.sin(alpha)
 
     tsu=su200+su004+su101
+    tV=L*A**2+(A**3-a**3)/(3*np.tan(alpha))
+    sv=tsu*10**9/tV #in 1/meter
+    density=3900000 #in g/m3
+    BET=sv/density
+    worksheet.write('B13', "BET (m^2/g)")
+    worksheet.write("C13", BET)
+
 
 
     su200p=100*su200/tsu
