@@ -16,6 +16,16 @@ import xlsxwriter
 import copy
 import cv2
 import imutils
+import inspect
+
+def remove_outliers(im,out_threshold=0.01):
+    data=im.data.ravel()
+    high=np.percentile(data,100-out_threshold)
+    low=np.percentile(data,out_threshold)
+    new_im=im.deepcopy()
+    new_im.data[new_im.data>high]=high
+    new_im.data[new_im.data<low]=low
+    return new_im
 
 def label2coord(imlabel):
     return np.dstack(np.where(imlabel))[0]
@@ -25,7 +35,7 @@ def thresholdpau(im):
     x=(d[1][:-1]+d[1][1:])/2
     cder=np.convolve(d[0][1:]-d[0][:-1],np.ones(4))
     mask=np.zeros(x.shape)
-    mask[10:]=1
+    mask[max(int(0.3*x.argmax()),10):]=1
     n=np.logical_and((cder>0)[1:-1], mask==1).argmax()
     th=x[n]
     return th
@@ -70,7 +80,6 @@ def create_fft_mask(fft,position,radius,simetric=False,add0=False):
         p2=center
         xi=int(p2[0]-radius)
         xf=int(p2[0]+radius+1)
-
         yi=int(p2[1]-radius)
         yf=int(p2[1]+radius+1)
 
@@ -91,14 +100,18 @@ class plane_analysis_v2():
                                     "004":False,
                                     "200":False},
                 printduration=True,
-                use_lap=False):
+                use_lap=False,
+                peak_detection_threshold=150,
+                minarea=80):
 
+        self.minarea=minarea
         self.filter_by_simmetry=filter_by_simmetry
         self.mask_radius=mask_radius
         self.image=hs.load(fname)
         self.save_images=save_images
         self.printduration=printduration
         self.use_lap=use_lap
+        self.peak_detection_threshold=peak_detection_threshold
 
         self.fft=getfft(self.image)
         self.rfft=to8bit(np.log(abs(self.fft)))
@@ -125,13 +138,13 @@ class plane_analysis_v2():
         e=cv2.morphologyEx(d,cv2.MORPH_OPEN,np.ones((5,5)))
 
         params=cv2.SimpleBlobDetector_Params()
-        params.minArea=80
+        params.minArea=self.minarea
         params.filterByCircularity=False
         params.filterByColor=False
         params.filterByConvexity=False
         params.filterByInertia=False
         params.minThreshold=0
-        params.maxThreshold=150
+        params.maxThreshold=self.peak_detection_threshold
         params.filterByArea=True
         params.minDistBetweenBlobs=10
         dt=cv2.SimpleBlobDetector_create(params)
@@ -157,7 +170,7 @@ class plane_analysis_v2():
 
 
     def plot_fft_peaks(self,plot_all=False):
-
+        plt.clf()
         plt.imshow(self.nice_rfft)
         if plot_all:
             for k in self.allfftpeaks:
@@ -243,8 +256,8 @@ class plane_analysis_v2():
                 self.current_size=size
 
                 if self.filter_by_simmetry[key]:
-                    ellipsoid_angle=abs(self.get_ellipsoid_angle()%90)
-                    if ellipsoid_angle<80 and ellipsoid_angle>10:
+                    ellipsoid_angle=abs(self.get_ellipsoid_angle(image_measurement)%90)
+                    if ellipsoid_angle<75 and ellipsoid_angle>15:
                         self.ok=False
 
                 if self.ok:
@@ -264,9 +277,10 @@ class plane_analysis_v2():
 
         return results
 
-    def get_ellipsoid_angle(self):
-        nzs=cv2.findNonZero(self.current_measure)
-        center,axes,angle=cv2.fitEllipse(nzs)
+    def get_ellipsoid_angle(self,image_measurement):
+        nzs=cv2.findNonZero(image_measurement)
+        self.current_ellipse=cv2.fitEllipse(nzs)
+        center,axes,angle=self.current_ellipse
         return angle
 
     def save_measurement_image(self):
@@ -618,7 +632,7 @@ def getfft(hs_im):# lacks returning a proper image
         fft=np.fft.fftshift(fft)
         return fft
 
-def plane_analysis_onfolder_v2(folder=None,**kwargs):
+def plane_analysis_onfolder_v2(folder=None,return_params=False,**kwargs):
     start=time.time()
     if folder==None:
         folder=os.getcwd()
@@ -643,7 +657,16 @@ def plane_analysis_onfolder_v2(folder=None,**kwargs):
     end=time.time()
     elapsed=end-start
     print("lasted "+str(elapsed)+" seconds")
-    return sizes
+    if return_params:
+        params={}
+        for k,v in inspect.signature(plane_analysis_v2).parameters.items():
+            params[k]=v.default
+        for k in kwargs.keys():
+            params[k]=kwargs[k]
+
+        return sizes,params
+    else:
+        return sizes
 
 
 
@@ -684,16 +707,19 @@ def plane_analysis_onfolder(folder=None,**kwargs):
     print("lasted "+str(elapsed)+" seconds")
     return sizes
 
-def anatase_results_xls(sizes,name):
+def anatase_results_xls(sizes,name,params=None):
     '''Returns table of results from the size distributions'''
     alpha=21.69*np.pi/180.
 
-    workbook = xlsxwriter.Workbook('Plane Analysis Results'+name+'.xlsx')
+    workbook = xlsxwriter.Workbook('Plane Analysis Results'+name+'.xlsx',
+                                    options={"nan_inf_to_errors":True})
     worksheet = workbook.add_worksheet()
 
     results={}
     for plane in ['200','004','101']:
         s=sizes[plane]
+        if len(s)==0:
+            s=np.array([0])
         results[plane]=[s.shape[0],
                np.average(s),
                np.std(s),
@@ -789,6 +815,13 @@ def anatase_results_xls(sizes,name):
         for i in range(5):
              worksheet.write(column[i]+str(row),results[plane][i])
 
+
+
+    if params!=None:
+        worksheet.write('L2', 'Parameters')
+        for i,k in enumerate(params.keys()):
+            worksheet.write('L'+str(i+3), str(k))
+            worksheet.write('M'+str(i+3), str(params[k]))
     workbook.close()
     return
 
