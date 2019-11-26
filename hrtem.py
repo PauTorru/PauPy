@@ -18,6 +18,65 @@ import cv2
 import imutils
 import inspect
 
+def thresholdpau2(im):
+    b=np.histogram(im.ravel(),bins=500)
+    pixel_n,I=b[0],b[1]
+    d=pixel_n[1:]-pixel_n[:-1]
+    Ith=I[-(np.argmax(d[::-1]<np.average(d[-100:])-np.std(d[-100:])**2))]
+
+    return Ith
+
+def get_shifts_image_series(imlist,filter_func,number_of_iterations = 10000,termination_eps = 1e-20):
+    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, number_of_iterations,  termination_eps)
+    #Align
+    warp_mode = cv2.MOTION_TRANSLATION
+    wms=[]
+
+    for i,_ in enumerate(imlist[:-1]):
+
+        im1=imlist[i]
+        im2=imlist[i+1]
+
+        im1_to_align=filter_func(im1)
+        im2_to_align=filter_func(im2)
+        warp_matrix = np.eye(2, 3, dtype=np.float32)
+        (cc, warp_matrix) = cv2.findTransformECC (im1_to_align,im2_to_align,warp_matrix, warp_mode, criteria)
+
+        wms.append(warp_matrix)
+
+    wms=np.dstack(wms)
+    wms_summed=np.zeros(wms.shape)
+    for i in range(wms.shape[-1]-1):
+        wms_summed[:,-1,i]=wms[:,-1,:i+1].sum(-1)
+
+    wms_summed[:,-1,0]=wms[:,-1,0]
+    wms_summed[:,:-1,:]=wms[:,:-1,:]
+    return wms_summed
+
+def apply_shifts_image_series(imlist,shifts):
+
+        buffer=int(np.ceil(shifts.max()))
+        im0=np.zeros(np.array(im.data.shape)+np.array([buffer*2,buffer*2]))
+        im0[buffer:-buffer,buffer:-buffer]=hr.to8bit(imlist[0])
+
+        aligned=[im0]
+
+
+        for i in range(shifts.data.shape[-1]):
+
+            im1=hr.to8bit(imlist[i])
+            im2=hr.to8bit(imlist[i+1])
+
+            a=np.zeros(np.array(im.data.shape)+np.array([buffer*2,buffer*2]))
+            a[buffer:-buffer,buffer:-buffer]=im2
+
+            im2_aligned = cv2.warpAffine(a,shifts[:,:,i],
+                                     (a.shape[1],a.shape[0]), flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
+
+            aligned.append(im2_aligned)
+
+        return aligned
+
 def remove_outliers(im,out_threshold=0.01):
     data=im.data.ravel()
     high=np.percentile(data,100-out_threshold)
@@ -102,7 +161,12 @@ class plane_analysis_v2():
                 printduration=True,
                 use_lap=False,
                 peak_detection_threshold=150,
-                minarea=80):
+                minarea=80,
+                filter_edge_particles=True,
+                peak_detection="default",
+                reduction=8,
+                scan_detection_threshold=20,
+                threshold_method=0):
 
         self.minarea=minarea
         self.filter_by_simmetry=filter_by_simmetry
@@ -112,19 +176,72 @@ class plane_analysis_v2():
         self.printduration=printduration
         self.use_lap=use_lap
         self.peak_detection_threshold=peak_detection_threshold
+        self.filter_edge_particles=filter_edge_particles
+        self.threshold=threshold_method
 
         self.fft=getfft(self.image)
         self.rfft=to8bit(np.log(abs(self.fft)))
+        self.nice_rfft=cv2.blur(self.rfft,(5,5))
+
         self.defplanes=planes2measure
-        self.allfftpeaks=self.get_fftpeaks()
+        if peak_detection=="default":
+            self.allfftpeaks=self.get_fftpeaks()
+        elif peak_detection=="scan":
+            self.allfftpeaks=self.get_fftpeaks_by_scan(reduction,scan_detection_threshold)
+
 
         self.fftpeaks=self.filter_planes(self.allfftpeaks)
+
+    def get_fftpeaks_by_scan(self,reduction,scan_detection_threshold):
+        im=self.image
+        sz=int(im.data.shape[0]/reduction)
+        sz_shift=int(sz/2)
+        fft=np.zeros((sz,sz))
+        for i in range(2*reduction-1):
+            for j in range(2*reduction-1):
+
+                section=im.isig[sz_shift*i:sz_shift*i+sz,sz_shift*j:sz_shift*j+sz]
+                section=remove_outliers(section)
+                fft=np.maximum(fft,cv2.blur(abs(getfft(section)),(5,5)))
+
+        fft=np.log(fft)
+        x1=cv2.blur(fft,(10,10))
+        x1=to8bit(fft-x1)
+        x1=x1-np.average(x1)
+        x1[x1<0]=0
+
+        params=cv2.SimpleBlobDetector_Params()
+        params.filterByArea=False
+        params.filterByCircularity=False
+        params.filterByColor=False
+        params.filterByConvexity=False
+        params.filterByInertia=False
+
+        params.minDistBetweenBlobs=0
+        params.minThreshold=scan_detection_threshold
+        params.maxThreshold=255
+        params.thresholdStep=20
+
+        params.minRepeatability=1
+
+
+        detector=cv2.SimpleBlobDetector_create(params)
+        kps=detector.detect(to8bit(x1))
+
+        return_kps=[]
+        for kp in kps:
+            if (kp.pt[0]-sz_shift)>0:
+                return_kps.append(np.array(kp.pt)*reduction)
+
+        #fft[sz_shift-5:sz_shift+5,sz_shift-5:sz_shift+5]=np.average(fft.ravel())
+        self.scanfft=fft
+        return return_kps
 
 
     def get_fftpeaks(self):
 
 
-        self.nice_rfft=cv2.blur(self.rfft,(5,5))
+
         b=cv2.blur(self.rfft,(500,500))
         c=self.nice_rfft-b
         c[c>200]=0
@@ -207,7 +324,13 @@ class plane_analysis_v2():
             r-=L
             r=cv2.morphologyEx(r,cv2.MORPH_OPEN,np.ones((11,11)))
 
-        th=thresholdpau(r)
+        if self.threshold==0:
+            th=thresholdpau(r)
+        elif self.threshold==1:
+            th=thresholdpau2(im)-im.min()
+            th/=im.max()
+            th*=255
+
         th=to8bit(r>th)
 
         if self.use_lap:
@@ -262,6 +385,8 @@ class plane_analysis_v2():
 
                 if self.ok:
                     sizes+=size
+                elif not self.filter_edge_particles:
+                    sizes+=size
 
                 if self.save_images:
                     fig=self.save_measurement_image()
@@ -309,7 +434,7 @@ class plane_analysis_v2():
             plt.gca().set_title("OK "+f"{self.current_size[0]:.2f}"+self.image.axes_manager[0].units)
 
         else:
-            plt.gca().set_title("NOT OK")
+            plt.gca().set_title("NOT OK; "+f"{self.current_size[0]:.2f}"+self.image.axes_manager[0].units)
 
         return fig
 

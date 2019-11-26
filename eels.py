@@ -255,12 +255,14 @@ class clustering():
         return self.linktree.shape[0]+np.array(range(50))*-1,self.linktree[-50:,2][::-1]
 
     def plot_dendogram(self,nclusters,depth=20):
+        plt.figure()
         dn=dendrogram(self.linktree,
         truncate_mode='lastp',
         leaf_rotation=90.,
         leaf_font_size=12.,
         show_contracted=False,  # to get a distribution impression in truncated branches
         color_threshold=self.linktree[-nclusters+1,2])
+        plt.show()
         return dn
 
     def hierachical_cluster(self,nclusters=2):
