@@ -166,7 +166,8 @@ class plane_analysis_v2():
                 peak_detection="default",
                 reduction=8,
                 scan_detection_threshold=20,
-                threshold_method=0):
+                threshold_method=0,
+                self.convex_th=0.8):
 
         self.minarea=minarea
         self.filter_by_simmetry=filter_by_simmetry
@@ -346,14 +347,30 @@ class plane_analysis_v2():
         particle=np.zeros(r.shape,"uint8")
         particle[b==n]=255
 
+        self.ok=True
+
+        #is bad threshold? i.e. is convex?
+        if self.filter_convex:
+            im2, contours, hierarchy = cv2.findContours(particle, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            hull=cv2.convexHull(contours[0],False)
+            drawing = np.zeros((im2.shape[0], im2.shape[1]), np.uint8)
+            cv2.drawContours(drawing, [hull], 0, 255, -1, 8)
+            convex=particle.sum()/drawing.sum()
+            if convex<self.convex_th:
+                self.ok=False
+
         #is on edge?
-        edge=np.ones(self.image.data.shape)
-        edge[5:-5,5:-5]=0
-        redge=imutils.rotate_bound(edge,angle)>0
-        if (redge*particle).sum()>0:
-            self.ok=False
-        else:
-            self.ok=True
+        if self.filter_edge_particles:
+            edge=np.ones(self.image.data.shape)
+            edge[5:-5,5:-5]=0
+            redge=imutils.rotate_bound(edge,angle)>0
+            if (redge*particle).sum()>0:
+                self.ok=False
+
+
+
+
+
 
         length=c[n,2]*self.image.axes_manager[0].scale
 
@@ -384,8 +401,6 @@ class plane_analysis_v2():
                         self.ok=False
 
                 if self.ok:
-                    sizes+=size
-                elif not self.filter_edge_particles:
                     sizes+=size
 
                 if self.save_images:
