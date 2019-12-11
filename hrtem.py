@@ -167,7 +167,7 @@ class plane_analysis_v2():
                 reduction=8,
                 scan_detection_threshold=20,
                 threshold_method=0,
-                self.convex_th=0.8):
+                convex_th=0.8):
 
         self.minarea=minarea
         self.filter_by_simmetry=filter_by_simmetry
@@ -179,6 +179,7 @@ class plane_analysis_v2():
         self.peak_detection_threshold=peak_detection_threshold
         self.filter_edge_particles=filter_edge_particles
         self.threshold=threshold_method
+        self.convex_th=convex_th
 
         self.fft=getfft(self.image)
         self.rfft=to8bit(np.log(abs(self.fft)))
