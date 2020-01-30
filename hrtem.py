@@ -167,7 +167,7 @@ class plane_analysis_v2():
                 reduction=8,
                 scan_detection_threshold=20,
                 threshold_method=0,
-                filter_convex=False
+                filter_convex=False,
                 convex_th=0.8):
 
         self.minarea=minarea
