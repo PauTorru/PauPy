@@ -78,6 +78,20 @@ def apply_shifts_image_series(imlist,shifts):
         return aligned
 
 def remove_outliers(im,out_threshold=0.01):
+    """
+    Remove hot pixels in an image.
+    Parameters:
+    ----------
+        im : hyperspy.signal
+            Image to be corrected.
+        out_threshold : float
+            Pixels with an intensity in the top % of the image will be clipped.
+
+    Returns :
+    ----------
+    new_im : hyperspy.signal
+        Copy of the original image with the outliers clipped"""
+
     data=im.data.ravel()
     high=np.percentile(data,100-out_threshold)
     low=np.percentile(data,out_threshold)
@@ -87,9 +101,30 @@ def remove_outliers(im,out_threshold=0.01):
     return new_im
 
 def label2coord(imlabel):
+    """
+    Find coordinates of true pixels in binary array.
+    Parameters:
+    ----------
+        imlabel : np.array
+
+    Returns :
+    ----------
+    coordinates : np.array
+        output of np.dstack(np.where(imlabel))[0] """
     return np.dstack(np.where(imlabel))[0]
 
 def thresholdpau(im):
+    """
+    Thresholds an image  by finding the where the histogram derivative is first positive .
+    Parameters:
+    ----------
+        im: np.array
+
+    Returns :
+    ----------
+    threshold : float
+         """
+
     d=np.histogram(im.ravel(),bins=100)
     x=(d[1][:-1]+d[1][1:])/2
     cder=np.convolve(d[0][1:]-d[0][:-1],np.ones(4))
@@ -99,17 +134,58 @@ def thresholdpau(im):
     th=x[n]
     return th
 
-def to8bit(im2):
-    im=copy.deepcopy(im2).astype("float")
+def to8bit(im_in):
+    """
+    Converts np.array to 8 bit properly, making it suitable for cv2 functions.
+    Parameters:
+    ----------
+        im_in: np.array
+
+    Returns :
+    ----------
+    im_out : np.array
+        8-bit image
+         """
+    im=copy.deepcopy(im_in).astype("float")
     im-=im.min()
     im/=im.max()
     im*=255
     return im.astype("uint8")
 
 def ifft(fft):
+    """
+    Calculate inverse fft ready for visualization .
+    Parameters:
+    ----------
+        fft: np.array
+
+    Returns :
+    ----------
+    inverse_fft : np.array
+         """
     return abs(np.fft.ifft2(np.fft.fftshift(fft)))
 
 def create_fft_mask(fft,position,radius,simetric=False,add0=False):
+    """
+    Create circular masks for 2D fft filtering.
+
+    Parameters:
+    ----------
+        fft: np.array
+        position: np.array
+            2-d coordinates of the mask center, in pixels.
+        radius: int
+            radius of the circular mask, in pixels.
+        simetric: bool
+            set to True to add a second mask opposite to "position" respect to the center of the fft.
+        add0: bool
+            add mask to the center of the fft.
+
+    Returns :
+    ----------
+    mask : np.array
+        bool array with the mask.
+         """
 
     mask=np.zeros(fft.shape)
     circle=cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
@@ -150,6 +226,51 @@ def create_fft_mask(fft,position,radius,simetric=False,add0=False):
 
 class plane_analysis_v2():
 
+    """
+    A class used to perform all analysis relative to crystalline sizes in HRTEM images.
+
+    Parameters:
+    ----------
+    fname: str
+        Name of the image to analize, loaded with hyperspy.load()
+    save_images: bool
+        Save png images with ifft and crystalline size measurment image.
+    planes2measure: dict
+        Plane indices and low,high spacings in ångstroms. Defaults for anatase.
+    mask_radius: int
+        Radius input for create_fft_mask.
+    filter_by_simmetry: dict
+        Indices for which to filter by symetry I.e. an ellipsoid fitted to the
+        particle must have a semi axis aligned with the planes.
+    printduration: bool
+        Prints the execution time of the analysis in seconds.
+    peak_detection_threshold: int
+        Used in blobdetector for fft peak detection, set higher to detect fainter peaks.
+    minarea: int
+        Size of the smallest fft peak that can be detected.
+    filter_edge_particles: bool
+        When true particles that touch the edge of the image are ignored.
+    peak_detection: "default", "scan"
+        Select the method for peak detection.
+    reduction: int
+        Used if "scan" peak search is used. Size of the search window relative to the original image.
+    scan_detection_threshold: int
+        Used if "scan" peak serach is used. Set lower to detect fainter peaks.
+    filter_convex: bool
+        If set to true, particles with holes etc. (not convex) in the ifft will be ignored.
+    convex_th: 0-1 float
+        0 implies no convex filtering. 1 implies only totally convex particles are allowed.
+
+
+    Attributes
+    ----------
+
+    Methods
+    -------
+    analize()
+        It outputs sizes in each specified crystalline direction.
+    """
+
     def __init__(self,fname,save_images=False,
                 planes2measure={"101":(3.417,3.617),
                                 "004":(2.279,2.479),
@@ -159,14 +280,12 @@ class plane_analysis_v2():
                                     "004":False,
                                     "200":False},
                 printduration=True,
-                use_lap=False,
                 peak_detection_threshold=150,
                 minarea=80,
                 filter_edge_particles=True,
                 peak_detection="default",
                 reduction=8,
                 scan_detection_threshold=20,
-                threshold_method=0,
                 filter_convex=False,
                 convex_th=0.8):
 
@@ -177,12 +296,9 @@ class plane_analysis_v2():
         self.image=hs.load(fname)
         self.save_images=save_images
         self.printduration=printduration
-        self.use_lap=use_lap
         self.peak_detection_threshold=peak_detection_threshold
         self.filter_edge_particles=filter_edge_particles
-        self.threshold=threshold_method
         self.convex_th=convex_th
-
         self.fft=getfft(self.image)
         self.rfft=to8bit(np.log(abs(self.fft)))
         self.nice_rfft=cv2.blur(self.rfft,(5,5))
@@ -302,9 +418,11 @@ class plane_analysis_v2():
                 for k in self.fftpeaks[key]:
                     plt.plot(k[0],k[1],"o",color=c,markersize=3)
 
-    def ifft_spot(self,spot):
+    def ifft_spot(self,spot,mask_radius=None):
+        if mask_radius==None:
+            mask_radius=self.mask_radius
 
-        mask=create_fft_mask(self.fft,spot,self.mask_radius)
+        mask=create_fft_mask(self.fft,spot,mask_radius)
         filtered=mask*self.fft
         return(ifft(filtered))
 
@@ -323,22 +441,10 @@ class plane_analysis_v2():
         r=to8bit(r)
         self.current_r=r
 
-        if self.use_lap:
-            L=cv2.Laplacian(r,0,0,5,4)
-            r-=L
-            r=cv2.morphologyEx(r,cv2.MORPH_OPEN,np.ones((11,11)))
-
-        if self.threshold==0:
-            th=thresholdpau(r)
-        elif self.threshold==1:
-            th=thresholdpau2(im)-im.min()
-            th/=im.max()
-            th*=255
-
+        th=thresholdpau(r)
         th=to8bit(r>th)
 
-        if self.use_lap:
-            th=cv2.morphologyEx(th,cv2.MORPH_DILATE,np.ones((7,7)))
+
 
         a,b,c,d=cv2.connectedComponentsWithStats(th,8)
         self.current_b=b
@@ -457,318 +563,6 @@ class plane_analysis_v2():
         return fig
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-class plane_analysis():
-
-    def __init__(self,fname,save_images=True, h=0.07,spot_sigma=300,
-                 use_watershed=False,
-                 filter_by_ellipse=False,
-                 filter_by_ellipse_axes=False,
-                 use_blob_detection=False):
-
-        '''
-        Class used to analyse HRTEM images of TiO2 and measure their sizes along different crystalline directions.
-
-        Parameters
-        ----------
-
-        fname : string
-            filename of the image to analyse. Uses Hyperspy load().
-        h: float
-            pamater used by ski.morphology.extrema.h_maxima.
-        spot_sigma: float
-            controls the radius of the masks applied to each diffraction spot when filtering.
-        save_images: bool
-            if True saves an image for the analysis of each particle.
-        use_watershed: bool
-            if True uses watershed filter to split touching particles.
-            No suitable if superimposed particles.
-        filter_by_ellipse: bool
-            If true filters planes identified as 004 if not aligned with one of the minor/major axes of the particle.
-            use if C/A is very different than one.
-        filter_by_ellipse_axes: bool
-            If true filters planes identified as 004 minor/major are very similar in size.
-            use if C/A is very different than one.
-
-        '''
-        self.image=hs.load(fname)
-        self.cal=self.image.axes_manager[0].scale
-        self.h=h
-        self.spot_sigma=spot_sigma
-        self.fft=getfft(self.image)
-        self.filterfft()
-        self.build_mask()
-        self.imshape=self.image.data.shape[0]
-        self.use_watershed=use_watershed
-        self.save=save_images
-        self.filter_by_ellipse=filter_by_ellipse
-        self.filter_by_ellipse_axes=filter_by_ellipse_axes
-        self.use_blob_detection=use_blob_detection
-
-    def label2coord(self,imlabel):
-        return np.dstack(np.where(imlabel))[0]
-
-    def fft_peak_distance(self,fft_coord):
-        if all(abs(fft_coord-self.image.data.shape[0]/2.)<10):
-            return 0
-        d=np.sqrt((abs(fft_coord-self.imshape/2.)**2.).sum())
-        return self.image.data.shape[0]*self.cal/d
-
-
-    def filterfft(self):
-        pfft=ski.filters.gaussian(abs(self.fft),sigma=5)
-        pfft_log=np.log(pfft)
-        pfft_log-=pfft_log.min()
-        pfft_log/=pfft_log.max()
-
-        self.filtered_fft=pfft_log
-
-    def find_plane_peaks(self,plane="101"):
-
-        '''plane="101", "004", "200"'''
-
-        lims={"101":[0.342,0.362],
-             "004":[0.2275,0.2475],
-             "200":[0.1792,0.1992]}
-
-        local_maxima = ski.morphology.extrema.h_maxima(self.filtered_fft,self.h)
-        allspots=self.label2coord(local_maxima)
-
-
-        d=np.array([self.fft_peak_distance(np.array((x,y))) for x,y in zip(allspots[:,1],allspots[:,0])])
-        mask=np.logical_and(np.logical_and(d>lims[plane][0], d<lims[plane][1]),allspots[:,0]-self.imshape/2>0)
-        self.fft_peaks=allspots[mask]
-
-        self.angles=np.arcsin((self.fft_peaks[:,0]-self.imshape/2)/np.linalg.norm(self.fft_peaks-self.imshape/2,axis=1))
-        for i in range(self.angles.shape[0]):
-            if self.fft_peaks[i,1]-self.imshape/2<0:
-                self.angles[i]=np.pi-self.angles[i]
-
-        return self.fft_peaks
-
-    def plot_fft_peaks(self):
-        plt.clf()
-        plt.imshow(self.filtered_fft)
-        for peak in self.fft_peaks:
-            plt.plot(peak[1],peak[0],"ro")
-        return
-
-
-    def build_mask(self):
-        # build mask
-        x = np.array(range(0,100))
-        y = np.array(range(0,100))
-        x, y = np.meshgrid(x, y)
-        z = np.exp(-((x-50)**2+(y-50)**2)/self.spot_sigma)
-        self.mask=z
-
-    def spot_ifft(self,spot_index):
-        s=self.fft_peaks[spot_index]
-        s1=self.image.data.shape[0]-s
-        mask=np.zeros(self.image.data.shape)
-        wmask=int(self.mask.shape[0]/2)
-        mask[s[0]-wmask:s[0]+wmask,s[1]-wmask:s[1]+wmask]=self.mask
-        mask[s1[0]-wmask:s1[0]+wmask,s1[1]-wmask:s1[1]+wmask]=self.mask
-        self.full_mask=mask
-
-        fft_filtered_by_spot=self.fft*mask
-
-        image_filtered_by_spot=np.fft.ifft2(np.fft.fftshift(fft_filtered_by_spot))
-
-        return abs(image_filtered_by_spot)
-
-
-    def blob_filter(self,image):
-        #sigma and power are arbitrary
-        self.current_filter=ski.filters.gaussian(image**1.25,sigma=8)[20:-20,20:-20]
-        return self.current_filter
-
-    def blob_threshold(self,image):
-        x=image-image.min()
-        x/=x.max()
-        x*=255
-        x=x.astype("uint8")
-        th=ski.filters.threshold_otsu(x)
-
-        x[x<th]=0
-        seed=(x==x.max())
-
-        if self.use_watershed:
-            local_max=ski.morphology.extrema.h_maxima(x,h=50)
-            markers = ndi.label(local_max)
-            ws=ski.morphology.watershed(-x,markers[0],mask=x)
-            maxs=[]
-            for i in range(markers[1]):
-                maxs.append(x[ws==i].max())
-            good=np.array(maxs).argmax()
-
-            for i in range(markers[1]):
-                if i!=good:
-                    x[ws==i]=0
-
-        elif self.use_blob_detection:
-            params = cv2.SimpleBlobDetector_Params()
-
-            # Filter by Area.
-            params.filterByArea = True
-            params.minArea = 25/(self.image.axes_manager[0].scale)**2
-            params.maxArea=np.inf
-            # Filter by Circularity
-            params.filterByCircularity = False
-            # Filter by Convexity
-            params.filterByConvexity = False
-            # Filter by Inertia
-            params.filterByInertia = False
-            d=cv2.SimpleBlobDetector_create(params)
-            kp=d.detect(255-hr.to8bit(x))
-            self.im_kp=cv2.drawKeypoints(hr.to8bit(iff),kp,np.array([]), (255,0,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
-            sds=[i.pt for i in kp]
-            seed=[]
-            for s in sds:
-                a=np.zeros(self.image.data.shape)
-                a[s]=255
-                seed.append()
-
-
-
-
-
-
-        mask=np.copy(x)
-        filled = ski.morphology.reconstruction(seed, mask, method='dilation')
-
-        self.current_th=filled
-        self.current_rot=filled
-
-        return filled
-
-    def calculate_ellipse_angle(self,th):
-        # calculate ellipse angle
-        x,y=np.nonzero(th)
-        xc,yc=np.mean(x),np.mean(y)
-        x=x.astype("float")-xc
-        y=y.astype("float")-yc
-        coords = np.vstack([x, y])
-        cov = np.cov(coords)
-        evals, evecs = np.linalg.eig(cov)
-        sort_indices = np.argsort(evals)[::-1]
-        x_v1, y_v1 = evecs[:, sort_indices[0]]
-        x_v2, y_v2 = evecs[:, sort_indices[1]]
-        return np.arctan((x_v1)/(y_v1)),evals[1]/evals[0]
-
-    def blob_measure(self,th,angle):
-        if any(th[0,:]!=0) or any(th[-1,:]!=0) or any(th[:,0]!=0) or any(th[:,-1]!=0):
-            return 0.
-        rot=ski.transform.rotate(th,angle*180/np.pi,True)
-        self.current_rot=rot
-        i=rot.max(0).argmax()
-        sizepxl=(rot.sum(0)[i:]==0).argmax()+(rot.sum(0)[:i][::-1]==0).argmax()
-        return sizepxl*self.cal
-
-    def save_images(self,plane,i):
-        c=self.fft_peaks
-
-        plt.clf()
-        figure=plt.gcf()
-        figure.set_size_inches(7,2)
-        plt.subplot(131)
-        plt.imshow(self.filtered_fft)
-        plt.plot(c[i,1],c[i,0],"ro")
-
-        plt.subplot(132)
-        plt.imshow(self.current_filter)
-
-        plt.subplot(133)
-        plt.imshow(self.current_rot)
-        plt.plot(self.current_rot.sum(0)+1000)
-        m=self.sizes[plane][-1]
-        if not m>0:
-            plt.gca().set_title("discarded")
-        else:
-            plt.gca().set_title(str(m)+" nm")
-        figure=plt.savefig(self.image.metadata.General.original_filename.split(".")[0]+"_"+plane+"_"+str(i)+".png")
-
-    def run_analysis(self):
-        self.sizes={"101":[],"004":[],"200":[]}
-
-        for plane in ["101", "004", "200"]:#["101", "004", "200"]
-            print("now working on "+plane)
-
-
-            c=self.find_plane_peaks(plane)
-            print("with "+ str(c.shape[0])+" particles")
-
-
-            for i in range(c.shape[0]):
-                filtered=self.blob_filter(self.spot_ifft(i))
-                th=self.blob_threshold(filtered)
-
-                if self.filter_by_ellipse and (plane=="004" or plane=="200"):
-                    a_el,raxes=self.calculate_ellipse_angle(th)
-                    a_sp=self.angles[i]
-                    x=(a_el-a_sp)*180/np.pi
-                    r=abs(x%90)
-                    if not(r<10 or r>80):
-                        print(self.image.metadata.General.original_filename.split(".")[0]+"_"+plane+"_"+str(i)+" not good")
-                        self.sizes[plane].append(0)
-                    else:
-                        if self.filter_by_ellipse_axes and abs(raxes-1)<0.4:
-                            print(self.image.metadata.General.original_filename.split(".")[0]+"_"+plane+"_"+str(i)+" not good")
-                            self.sizes[plane].append(0)
-                        else:
-                            self.sizes[plane].append(self.blob_measure(th,self.angles[i]))
-
-                else:
-                    self.sizes[plane].append(self.blob_measure(th,self.angles[i]))
-
-                if self.save:
-                    self.save_images(plane,i)
-
-        return
-
-
 def getfft(hs_im):# lacks returning a proper image
         im=hs_im.data
         fft=np.fft.fft2(im)
@@ -812,43 +606,6 @@ def plane_analysis_onfolder_v2(folder=None,return_params=False,**kwargs):
         return sizes
 
 
-
-def plane_analysis_onfolder(folder=None,**kwargs):
-    '''kwargs are passed to plane_analysis'''
-
-    start=time.time()
-    if folder==None:
-        folder=os.getcwd()
-
-    sizes200=[]
-    sizes004=[]
-    sizes101=[]
-
-    for file in os.listdir(folder):
-        ext=file.split(".")[-1]
-        if ext=="dm3" or ext=="tif":
-            print("now working on file "+file)
-            a=plane_analysis(fname=folder+"/"+file,**kwargs)
-            a.run_analysis()
-            sizes200+=a.sizes["200"]
-            sizes004+=a.sizes["004"]
-            sizes101+=a.sizes["101"]
-
-
-    print(str(sizes200.count(0))+" discarded measurements for 200")
-    print(str(sizes004.count(0))+" discarded measurements for 004")
-    print(str(sizes101.count(0))+" discarded measurements for 101")
-
-
-    sizes={}
-    sizes["101"]=np.array(list(filter(lambda a: a != 0, sizes101)))
-    sizes["200"]=np.array(list(filter(lambda a: a != 0, sizes200)))
-    sizes["004"]=np.array(list(filter(lambda a: a != 0, sizes004)))
-
-    end=time.time()
-    elapsed=end-start
-    print("lasted "+str(elapsed)+" seconds")
-    return sizes
 
 def anatase_results_xls(sizes,name,params=None):
     '''Returns table of results from the size distributions'''
