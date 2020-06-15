@@ -10,7 +10,19 @@ from matplotlib.colors import LinearSegmentedColormap
 from sklearn.cluster import KMeans
 
 
+def evaluate_th(im,th):
+    I=im.data.sum(-1)
+    plt.clf()
+    plt.subplot(131)
+    plt.hist(I.ravel())
 
+    plt.subplot(132)
+    plt.imshow(I)
+
+    plt.subplot(133)
+    plt.imshow(I>th)
+    return th
+    
 def adapt_eaxis(s_list):
     '''Interpolate spectra from all the images in s_list so that they have a common eaxis'''
     #decide common energy axis
@@ -120,9 +132,8 @@ def compare_spectra(s1,s2,same_size=True):
 ###################################################################################
 def norm(to_norm):
     '''plot_dm3 uses dis to norm the curves'''
-    factor=(to_norm.data.max()-to_norm.data.min())
-    normed=(to_norm.data-to_norm.data.min())/factor
-    return normed,factor
+    normed=(to_norm.data-to_norm.data.min())/(to_norm.data.max()-to_norm.data.min())
+    return normed
 
 ###################
 def plot_dm3(dm3,normit=False,shift=0.,scale=1.,offset=0.,**kwargs):

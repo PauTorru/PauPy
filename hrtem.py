@@ -55,22 +55,22 @@ def get_shifts_image_series(imlist,filter_func,number_of_iterations = 10000,term
 
 def apply_shifts_image_series(imlist,shifts):
 
-        buffer=int(np.ceil(shifts.max()))
-        im0=np.zeros(np.array(im.data.shape)+np.array([buffer*2,buffer*2]))
-        im0[buffer:-buffer,buffer:-buffer]=hr.to8bit(imlist[0])
+        buffer=int(np.ceil(abs(shifts).max()))
+        im0=np.zeros(np.array(imlist[0].data.shape)+np.array([buffer*2,buffer*2]))
+        im0[buffer:-buffer,buffer:-buffer]=to8bit(imlist[0].data)
 
         aligned=[im0]
 
 
-        for i in range(shifts.data.shape[-1]):
+        for i in range(shifts.data.shape[0]):
 
-            im1=hr.to8bit(imlist[i])
-            im2=hr.to8bit(imlist[i+1])
+            im1=to8bit(imlist[i].data)
+            im2=to8bit(imlist[i+1].data)
 
-            a=np.zeros(np.array(im.data.shape)+np.array([buffer*2,buffer*2]))
+            a=np.zeros(np.array(im1.data.shape)+np.array([buffer*2,buffer*2]))
             a[buffer:-buffer,buffer:-buffer]=im2
 
-            im2_aligned = cv2.warpAffine(a,shifts[:,:,i],
+            im2_aligned = cv2.warpAffine(a,shifts[i,:,:],
                                      (a.shape[1],a.shape[0]), flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
 
             aligned.append(im2_aligned)
@@ -113,7 +113,7 @@ def label2coord(imlabel):
         output of np.dstack(np.where(imlabel))[0] """
     return np.dstack(np.where(imlabel))[0]
 
-def thresholdpau(im):
+def thresholdpau(im,bins=500):
     """
     Thresholds an image  by finding the where the histogram derivative is first positive .
     Parameters:
@@ -125,7 +125,7 @@ def thresholdpau(im):
     threshold : float
          """
 
-    d=np.histogram(im.ravel(),bins=100)
+    d=np.histogram(im.ravel(),bins=bins)
     x=(d[1][:-1]+d[1][1:])/2
     cder=np.convolve(d[0][1:]-d[0][:-1],np.ones(4))
     mask=np.zeros(x.shape)
@@ -329,9 +329,12 @@ class plane_analysis_v2():
         x1=to8bit(fft-x1)
         x1=x1-np.average(x1)
         x1[x1<0]=0
+        x1=cv2.medianBlur(to8bit(x1),7)
+        self.x1=x1
 
         params=cv2.SimpleBlobDetector_Params()
-        params.filterByArea=False
+        params.filterByArea=True,
+        params.minArea=self.minarea
         params.filterByCircularity=False
         params.filterByColor=False
         params.filterByConvexity=False
@@ -614,7 +617,7 @@ def anatase_results_xls(sizes,name,params=None):
     workbook = xlsxwriter.Workbook('Plane Analysis Results'+name+'.xlsx',
                                     options={"nan_inf_to_errors":True})
     worksheet = workbook.add_worksheet()
-
+    values={}
     results={}
     for plane in ['200','004','101']:
         s=sizes[plane]
@@ -630,6 +633,16 @@ def anatase_results_xls(sizes,name,params=None):
     C=results['004'][1]
     L=results['101'][1]/np.sin(alpha)-A/np.tan(alpha)
     a=(results['101'][1]-C*np.sin(alpha))/np.cos(alpha)
+
+    values["A"]=A
+    values["C"]=C
+    values["L"]=L
+    values["a"]=a
+    values["d101"]=results['101'][1]
+    values["nA"]=results['200'][0]
+    values["nC"]=results['004'][0]
+    values["n101"]=results['101'][0]
+
 
     d101=results['101'][2]/2.
     dA=results['200'][2]/2.
@@ -661,15 +674,21 @@ def anatase_results_xls(sizes,name,params=None):
     worksheet.write('D11', da)
     worksheet.write('D12', dCA)
 
-    su200=4*A*L
-    su004=2*a*a
-    su101=2*(A*A-a*a)/np.sin(alpha)
+    su200=max(4*A*L,0)
+    su004=max(2*a*a,0)
+    su101=max(2*(A*A-a*a)/np.sin(alpha),0)
+
+    Vcube=max(L*A**2,0)
+    Vpiramid=max((A**3-a**3)/(3*np.tan(alpha)),0)
 
     tsu=su200+su004+su101
-    tV=L*A**2+(A**3-a**3)/(3*np.tan(alpha))
+    tV=Vcube+Vpiramid
+
+
     sv=tsu*10**9/tV #in 1/meter
     density=3900000 #in g/m3
     BET=sv/density
+    values["BET"]=BET
     worksheet.write('B13', "BET (m^2/g)")
     worksheet.write("C13", BET)
 
@@ -723,7 +742,7 @@ def anatase_results_xls(sizes,name,params=None):
             worksheet.write('L'+str(i+3), str(k))
             worksheet.write('M'+str(i+3), str(params[k]))
     workbook.close()
-    return
+    return values
 
 def get_histograms(sizes,bins=80,range=(0,80)):
 
