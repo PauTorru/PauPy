@@ -22,7 +22,7 @@ def evaluate_th(im,th):
     plt.subplot(133)
     plt.imshow(I>th)
     return th
-    
+
 def adapt_eaxis(s_list):
     '''Interpolate spectra from all the images in s_list so that they have a common eaxis'''
     #decide common energy axis
@@ -129,11 +129,6 @@ def compare_spectra(s1,s2,same_size=True):
     scomp.plot()
     return scomp
 
-###################################################################################
-def norm(to_norm):
-    '''plot_dm3 uses dis to norm the curves'''
-    normed=(to_norm.data-to_norm.data.min())/(to_norm.data.max()-to_norm.data.min())
-    return normed
 
 ###################
 def plot_dm3(dm3,normit=False,shift=0.,scale=1.,offset=0.,**kwargs):
@@ -196,6 +191,11 @@ def rebuild(factors,loadings):
 
     return s
 #####################################################
+def norm(a):
+    n=a-a.min()
+    n/=n.max()
+    return n
+
 def dark_correct_from_image(s,d):
     '''Apply dark reference (d) to spectrum image, spectrum line or signle spectrum (s). returns spectral data dark corrected'''
     dark=d.deepcopy()
@@ -232,6 +232,7 @@ class clustering():
         if normalize:
             self.objects-=self.objects.min()
             self.objects/=self.objects.sum(-1)[:,np.newaxis]
+            self.objects[np.isnan(self.objects)]=0
 
         if on_pca_scores:
             self.si.decomposition(**pca_kwargs)
@@ -281,10 +282,13 @@ class clustering():
         self.labels=fcluster(self.linktree,self.linktree[-nclusters,2],criterion="distance").reshape(self.si.data.shape[:-1])
         self.labels=np.array(self.labels)
 
-    def plot_cluster_image(self):
+    def plot_cluster_image(self,gcf=True):
 
         colors=list(sns.color_palette("bright",self.nclusters))
-        fig=plt.figure()
+        if not gcf:
+            fig=plt.figure()
+        else:
+            plt.clf()
         ax1=plt.subplot(121)
         cm = LinearSegmentedColormap.from_list('dunno', colors)
         plt.imshow(self.labels,cmap=cm)
