@@ -192,7 +192,7 @@ def rebuild(factors,loadings):
     return s
 #####################################################
 def norm(a):
-    n=a-a.min()
+    n=a.astype("float")-a.min()
     n/=n.max()
     return n
 

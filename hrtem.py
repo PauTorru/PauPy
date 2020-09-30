@@ -91,14 +91,22 @@ def remove_outliers(im,out_threshold=0.01):
     ----------
     new_im : hyperspy.signal
         Copy of the original image with the outliers clipped"""
-
-    data=im.data.ravel()
-    high=np.percentile(data,100-out_threshold)
-    low=np.percentile(data,out_threshold)
-    new_im=im.deepcopy()
-    new_im.data[new_im.data>high]=high
-    new_im.data[new_im.data<low]=low
-    return new_im
+    if isinstance(im,hs.signals.Signal1D) or isinstance(im,hs.signals.Signal2D):
+        data=im.data.ravel()
+        high=np.percentile(data,100-out_threshold)
+        low=np.percentile(data,out_threshold)
+        new_im=im.deepcopy()
+        new_im.data[new_im.data>high]=high
+        new_im.data[new_im.data<low]=low
+        return new_im
+    else:
+        data=im.ravel()
+        high=np.percentile(data,100-out_threshold)
+        low=np.percentile(data,out_threshold)
+        new_im=im.copy()
+        new_im.data[new_im.data>high]=high
+        new_im.data[new_im.data<low]=low
+        return new_im
 
 def label2coord(imlabel):
     """
@@ -414,12 +422,12 @@ class plane_analysis_v2():
         plt.imshow(self.nice_rfft)
         if plot_all:
             for k in self.allfftpeaks:
-                plt.plot(k[0],k[1],"ro",markersize=3)
+                plt.plot(k[0],k[1],"ro",markersize=6,markerfacecolor="None",markeredgecolor="red", markeredgewidth=2)
 
         else:
             for key,c in zip(list(self.defplanes.keys()),plt.rcParams['axes.prop_cycle'].by_key()['color'][:len(self.defplanes.keys())]):
                 for k in self.fftpeaks[key]:
-                    plt.plot(k[0],k[1],"o",color=c,markersize=3)
+                    plt.plot(k[0],k[1],"o",markersize=6,markerfacecolor="None",markeredgecolor=c, markeredgewidth=2)
 
     def ifft_spot(self,spot,mask_radius=None):
         if mask_radius==None:
@@ -463,9 +471,9 @@ class plane_analysis_v2():
 
         #is bad threshold? i.e. is convex?
         if self.filter_convex:
-            im2, contours, hierarchy = cv2.findContours(particle, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contours, hierarchy = cv2.findContours(particle, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             hull=cv2.convexHull(contours[0],False)
-            drawing = np.zeros((im2.shape[0], im2.shape[1]), np.uint8)
+            drawing = np.zeros((particle.shape[0], particle.shape[1]), np.uint8)
             cv2.drawContours(drawing, [hull], 0, 255, -1, 8)
             convex=particle.sum()/drawing.sum()
             if convex<self.convex_th:
